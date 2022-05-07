@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+</head>
+<body>
+<script>
+    const json = { text: 'hello world' };
+
+    const bucket = new WeakMap()
+    let activeEffect;
+
+    function effect(fn) {
+        activeEffect = fn;
+        fn()
+    }
+
+    // 代理操作对象
+    const obj = new Proxy(json, {
+        // 拦截读取操作
+        get: (target, key) => {
+            track(target, key)
+            // 返回值
+            return target[key]
+        },
+        // 拦截设置操作
+        set: (target, key, value) => {
+            target[key] = value
+
+            trigger(target, key)
+
+            return true
+        }
+    })
+
+    function track(target, key) {
+        if (!activeEffect) return
+        let depsMap = bucket.get(target)
+
+        if (!depsMap) {
+            // 不存在时新建Map并关联target
+            bucket.set(target, depsMap = new Map())
+        }
+
+        let deps = depsMap.get(key)
+        if (!deps) {
+            // deps不存在时新建Set
+            depsMap.set(key, deps = new Set())
+        }
+        // 将activeEffect函数与key关联
+        deps.add(activeEffect)
+    }
+
+    function trigger(target, key) {
+        let depsMap = bucket.get(target)
+        if (!depsMap) return
+
+        let effects = depsMap.get(key)
+        effects && effects.forEach(fn => fn())
+    }
+
+    effect(() => {
+        document.body.innerText = obj.text;
+    })
+
+    setTimeout(() => {
+        obj.text = 'hello vue3!';
+    }, 3000)
+
+</script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+</head>
+<body>
+<script>
+    const json = { text: 'hello world' };
+
+    function effect() {
+        document.body.innerText = json.text;
+    }
+
+    // 代理操作对象
+    const obj = new Proxy(json, {
+        // 拦截读取操作
+        get: (target, key) => {
+            // 返回值
+            return target[key]
+        },
+        // 拦截设置操作
+        set: (target, key, value) => {
+            target[key] = value
+            // 当监听到设置操作时重新执行effect函数
+            effect()
+            return true
+        }
+    })
+
+    effect()
+
+    obj.text = 'hello vue3!';
+
+</script>
+</body>
+</html>
