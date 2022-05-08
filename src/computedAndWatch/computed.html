@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>computed</title>
+</head>
+<body>
+<script>
+    const json = { num1: 1, num2: 2 };
+
+    const bucket = new WeakMap()
+    let activeEffect;
+    const effectStack = []
+
+    function effect(fn, options = {}) {
+        const effectFn = () => {
+            cleanup(effectFn)
+            activeEffect = effectFn
+
+            effectStack.push(effectFn)
+            // 新增
+            const result = fn()
+
+            effectStack.pop()
+            activeEffect = effectStack[effectStack.length - 1]
+            // 新增
+            return result
+        }
+        // 存贮所有与当前effect函数相关联的依赖集合
+        effectFn.deps = []
+        // 将options赋值给effect函数内的effectFn.options
+        effectFn.options = options
+
+        if (!options.lazy) {
+            effectFn()
+        }
+
+        return effectFn
+    }
+
+    // 代理操作对象
+    const obj = new Proxy(json, {
+        // 拦截读取操作
+        get: (target, key) => {
+            track(target, key)
+            // 返回值
+            return target[key]
+        },
+        // 拦截设置操作
+        set: (target, key, value) => {
+            target[key] = value
+
+            trigger(target, key)
+
+            return true
+        }
+    })
+
+    function cleanup(effectFn) {
+        for (let i = 0; i < effectFn.deps.length; i++) {
+            const deps = effectFn.deps[i]
+            deps.delete(effectFn)
+        }
+        effectFn.deps.length = 0
+    }
+
+    function track(target, key) {
+        if (!activeEffect) return
+        let depsMap = bucket.get(target)
+
+        if (!depsMap) {
+            // 不存在时新建Map并关联target
+            bucket.set(target, depsMap = new Map())
+        }
+
+        let deps = depsMap.get(key)
+        if (!deps) {
+            // deps不存在时新建Set
+            depsMap.set(key, deps = new Set())
+        }
+        // 将activeEffect函数与key关联
+        deps.add(activeEffect)
+        // deps是一个与当前effect函数相关联的集合，将其添加到activeEffect.deps中去
+        activeEffect.deps.push(deps)
+    }
+
+    function trigger(target, key) {
+        let depsMap = bucket.get(target)
+        if (!depsMap) return
+
+        let effects = depsMap.get(key)
+
+        const effectsToRun = new Set()
+        effects && effects.forEach((effectFn) => {
+            if (effectFn !== activeEffect) {
+                effectsToRun.add(effectFn)
+            }
+        })
+
+        effectsToRun.forEach(fn => {
+            // 判断effectFn是否有scheduler函数
+            if (fn.options.scheduler) {
+                fn.options.scheduler(fn)
+            } else {
+                fn()
+            }
+        })
+    }
+
+    function computed(getter) {
+        // 缓存计算后的值
+        let value;
+        // 是否需要重新计算
+        let dirty = true;
+
+        const effectFn = effect(getter, {
+            lazy: true,
+            // 添加调度器,当依赖数据发生改变时，会回调scheduler函数，将dirty设置为true，再次访问value值时会触发一次新的计算
+            scheduler() {
+                if (!dirty) {
+                    dirty = true
+                    // 当计算属性依赖的响应式数据发生改变时，手动调用trigger触发响应
+                    trigger(data, 'value')
+                }
+            }
+        })
+
+        const data = {
+            get value() {
+                if (dirty) {
+                    value = effectFn()
+                    dirty = false
+                }
+                // 当读取value时，手动调用track函数进行追踪
+                track(data, 'value')
+
+                return value
+            }
+        }
+
+        return data
+    }
+
+    // 测试effect的lazy实现
+    // const effectFn = effect(() => {
+    //     return obj.num1 + obj.num2
+    // }, {
+    //     lazy: true
+    // })
+    //
+    // setTimeout(() => {
+    //     console.log('effectFn()', effectFn())
+    // }, 2000)
+
+    // 测试computed
+    // const sum = computed(() => {
+    //     return obj.num1 + obj.num2
+    // })
+    // // 此时输出3
+    // console.log('sum first', sum.value)
+    //
+    // obj.num1 = 2
+    //
+    // // 此时输出4
+    // console.log('sum second', sum.value)
+    //
+    // effect(() => {
+    //     // 先输出4 obj.num1 修改为1时输出3
+    //     console.log('effect sum', sum.value)
+    // })
+    //
+    // obj.num1 = 1
+
+</script>
+</body>
+</html>
