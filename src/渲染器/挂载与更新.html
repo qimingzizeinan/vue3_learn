@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>挂载与更新</title>
+</head>
+<body>
+<div id="app"></div>
+<script>
+
+    function shouldSetAsProps(el, key, value) {
+        // 特殊处理
+        // example
+        // <form id="form1"></form>
+        // <input form="form1" />
+        // 此时的form是只读的只能用setAttribute设置
+        if (key === 'form' && el.tagName === 'INPUT') return false
+        // 用in 操作符判断key是否在对应的dom properties
+        return key in el
+    }
+    // 自定义渲染器
+    function createRenderer(options) {
+        // 获取自定义平台方法
+        const {
+            createElement,
+            insert,
+            setElementText,
+            patchProps,
+            createText,
+            setText
+        } = options
+
+        // 节点装载
+        function mountElement(vnode, container) {
+            // 创建真实的Dom且赋值给虚拟节点的el属性，便于复用，提高性能
+            const el = vnode.el = createElement(vnode.type)
+            // 子节点为字符串
+            if (typeof vnode.children === 'string') {
+                // 设置文字
+                setElementText(el, vnode.children)
+            } else if (Array.isArray(vnode.children)) {
+                // 子节点为数组, 循环更新子节点
+                vnode.children.forEach(child => {
+                    patch(null, child, el)
+                })
+            }
+            // 将虚拟节点上的属性赋值给真实的DOM
+            if (vnode.props) {
+                for (const key in vnode.props) {
+                    patchProps(el, key, null, vnode.props[key])
+                }
+            }
+            // 向真实的DOM插入节点
+            insert(el, container)
+        }
+
+        function patchChildren(n1, n2, container) {
+            // 新节点的子节点是字符串，更新子节点真实DOM的文字
+            if (typeof n2.children === 'string') {
+                // 旧节点是数组，循环卸载旧子节点
+                if (Array.isArray(n1.children)) {
+                    n1.children.forEach((c) => unmount(c))
+                }
+                // 更新文字
+                setElementText(container, n2.children)
+            } else if (Array.isArray(n2.children)) {
+                // 新节点是数组
+                if (Array.isArray(n1.children)) {
+                    // 这里是DIFF算法实现的地方
+                    // 先卸载旧节点
+                    n1.children.forEach(c => unmount(c))
+                    // 在更新新节点
+                    n2.children.forEach(c => patch(null, c, container))
+                } else {
+                    // 设置为空
+                    setElementText(container, '')
+                    // 新节点装载
+                    n2.children.forEach(c => patch(null, c, container))
+                }
+            } else {
+                // 新节点不存在子节点时
+
+                // 判断旧节点是否为数组
+                if (Array.isArray(n1.children)) {
+                    // 循环卸载
+                    n1.children.forEach(c => unmount(c))
+                } else if (typeof n1.children === 'string') {
+                    // 设置为空
+                    setElementText(container, '')
+                }
+            }
+        }
+
+        function patchElement(n1, n2) {
+            // 将旧节点的真实DOM赋值给新节点
+            const el = n2.el = n1.el
+            // 旧节点属性
+            const oldProps = n1.props
+            // 新节点属性
+            const newProps = n2.props
+            // 更新新节点属性
+            for (const key in newProps) {
+                // 新旧节点不相等时更新
+                if (newProps[key] !== oldProps[key]) {
+                    patchProps(el, key, oldProps[key], newProps[key])
+                }
+            }
+            for (const key in oldProps) {
+                // 旧节点的属性key不存在新节点上，说明要删除该属性
+                if (!(key in newProps)) {
+                    patchProps(el, key, oldProps[key], null)
+                }
+            }
+            // 更新子节点
+            patchChildren(n1, n2, el)
+        }
+        // 卸载节点
+        function unmount(vnode) {
+            if (vnode.type === Fragment) {
+                vnode.children.forEach(c => unmount(c))
+                return
+            }
+            const parent = vnode.el.parentNode
+            if (parent) {
+                parent.removeChild(vnode.el)
+            }
+        }
+        // 更新函数
+        function patch(n1, n2, container) {
+            if (n1 && n1.type !== n2.type) {
+                unmount(n1)
+                n1 = null
+            }
+            // 从新VNode中取出节点类型
+            const { type } = n2
+            // 节点类型为字符串字符串是普通html标签
+            if (typeof type === 'string') {
+                // 如果旧的VNode不存在则装载DOM
+                if (!n1) {
+                    // 装载DOM
+                    mountElement(n2, container)
+                } else {
+                    // 更新Dom
+                    patchElement(n1, n2)
+                }
+            } else if (type === Text) {
+                // 文本节点
+                // 不存在旧节点
+                if (!n1) {
+                    // 创建新的文本节点
+                    const el = n2.el = createText(n2.children)
+                    // 插入文本节点
+                    insert(el, container)
+                } else {
+                    // 将旧节点的实际dom引用赋值给新节点的引用
+                    // el为渲染在浏览器中的实际dom
+                    // el example: <div><span>实际节点</span>></div>
+                    const el = n2.el = n1.el
+                    // 判断修旧VNode的值是否相同，不相同时才更新值
+                    if (n2.children !== n1.children) {
+                        setText(el, n2.children)
+                    }
+                }
+            } else if (type === Fragment) {
+                // 组件渲染
+                // 不存在旧节点
+                if (!n1) {
+                    // 循环渲染新节点的子节点
+                    n2.children.forEach(c => patch(null, c, container))
+                } else {
+                    // 更新子节点
+                    patchChildren(n1, n2, container)
+                }
+            }
+        }
+
+        function render(vnode, container) {
+            // 传入了虚拟DOM
+            if (vnode) {
+                // 新 vnode 存在，将其与旧 vnode 一起传递给 patch 函数进行打补丁
+                patch(container._vnode, vnode, container)
+            } else {
+                if (container._vnode) {
+                    // 旧 vnode 存在，且新 vnode 不存在，说明是卸载(unmount)操作
+                    unmount(container._vnode)
+                }
+            }
+            // 把 vnode 存储到 container._vnode 下，即后续渲染中的旧 vnode
+            container._vnode = vnode
+        }
+
+        return {
+            render
+        }
+    }
+
+    // 这里传参是为了实现跨平台，将特定平台的API传入进去
+    const renderer = createRenderer({
+        // 创建元素
+        createElement(tag) {
+            return document.createElement(tag)
+        },
+        // 设置元素内容
+        setElementText(el, text) {
+            el.textContent = text
+        },
+        // 插入元素
+        insert(el, parent, anchor = null) {
+            parent.insertBefore(el, anchor)
+        },
+        // 创建文本node
+        createText(text) {
+            return document.createTextNode(text)
+        },
+        // 设置标签值
+        setText(el, text) {
+            el.nodeValue = text
+        },
+        // 标签属性的打补丁
+        patchProps(el, key, prevValue, nextValue) {
+            // onClick等事件的处理
+            if (/^on/.test(key)) {
+
+                const invokers = el._vei || (el._vei = {})
+                // 伪造的事件处理函数
+                let invoker = invokers[key]
+                // 名称
+                const name = key.slice(2).toLowerCase()
+                if (nextValue) {
+                    // 不存在伪造的事件处理函数，创建一个并缓存到el._vei中去
+                    if (!invoker) {
+                        invoker = el._vei[key] = (e) => {
+                            // 如果事件发生的时间早于事件处理函数绑定的时间，则不执行事件处理函数
+                            if (e.timeStamp < invoker.attached) return
+                            // invoker.value为数组，遍历逐个调用处理函数
+                            if (Array.isArray(invoker.value)) {
+                                invoker.value.forEach(fn => fn(e))
+                            } else {
+                                invoker.value(e)
+                            }
+                        }
+                        // 将真正的事件处理函数赋值给invoker.value
+                        invoker.value = nextValue
+
+                        invoker.attached = performance.now()
+                        // 绑定invoker为事件处理函数
+                        el.addEventListener(name, invoker)
+                    } else {
+                        invoker.value = nextValue
+                    }
+                } else if (invoker) {
+                    // 新的事件函数不存在且之前的存在，则移除绑定
+                    el.removeEventListener(name, invoker)
+                }
+            } else if (key === 'class') {
+                // class名的修改
+                el.className = nextValue || ''
+            } else if (shouldSetAsProps(el, key, nextValue)) {
+                // 修正节点属性的类型为boolean值且值为空的情况
+                // example <button disabled>Button</button>
+                // 用虚拟节点标识
+                // const button = {
+                //     type: 'button',
+                //     props: {
+                //         disabled: ''
+                //     }
+                // }
+                const type = typeof el[key]
+                if (type === 'boolean' && nextValue === '') {
+                    el[key] = true
+                } else {
+                    // 设置值
+                    el[key] = nextValue
+                }
+            } else {
+                // 如果要设置的属性没有对应的dom properties 则使用setAttribute函数设置属性
+                el.setAttribute(key, nextValue)
+            }
+        }
+    })
+
+    const Fragment = Symbol()
+    const newVnode = {
+        // 字符串为普通html标签
+        type: 'div',
+        // 数组为子节点
+        children: [
+            {
+                // Fragment为组件
+                type: Fragment,
+                children: [
+                    { type: 'p', children: 'text 1' },
+                    { type: 'p', children: 'text 2' },
+                    { type: 'p', children: 'text 3' }
+                ]
+            },
+            { type: 'section', children: '分割线' }
+        ]
+    }
+    renderer.render(newVnode, document.querySelector('#app'))
+
+    const oldVnode = {
+        type: 'div',
+        children: [
+            {
+                type: Fragment,
+                children: [
+                    { type: 'p', children: 'text 1' },
+                    { type: 'p', children: 'text 2' },
+                    { type: 'p', children: 'text 3' },
+                    { type: 'p', children: 'text 4' }
+                ]
+            }
+        ]
+    }
+    renderer.render(oldVnode, document.querySelector('#app'))
+
+</script>
+</body>
+</html>
