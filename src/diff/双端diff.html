@@ -139,7 +139,7 @@
                     if (idxInOld > 0) {
                         // 获取旧节点列表需要移动的VNode
                         const vnodeToMove = oldChildren[idxInOld]
-                        // 更新
+                        // 更新dom
                         patch(vnodeToMove, newStartVNode, container)
                         // 将需要移动的dom移动到旧节点列表开始项的dom前面
                         insert(vnodeToMove.el, container, oldStartVNode.el)
